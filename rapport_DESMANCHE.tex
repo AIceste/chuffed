@@ -1,0 +1,223 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage[table]{xcolor}
+\usepackage{fancyvrb}
+\usepackage[margin=0.9in]{geometry}
+
+\begin{document}
+
+\title{
+	IFT 4001 Optimisation Combinatoire \\
+	\textbf{
+	Implémentation de l'heuristique de recherche "Impact" dans Chuffed \\
+	}
+	Pour Claude-Guy Quimper \\
+	Hiver 2021, Université  Laval (Québec) \\
+}
+\author{ Geremy DESMANCHE \\ 111 232 013}
+\date{\today}
+
+\maketitle
+\pagebreak
+
+\section{Introduction}
+En résolution de problèmes combinatoires, nous avons vu que différentes
+heuristiques de recherche pour la sélection des variables et des valeurs
+sur lesquelles filtrer peut avoir un impact significatif sur l'efficacité
+de la recherche. \\
+\\
+Le présent projet d'exploration s'intéresse à une implémentation de 
+l'heuristique de sélection de variable "Impact", qui priorise le filtrage
+sur les variables ayant historiquement obtenu de bons résultats, dans
+Chuffed, ainsi qu'à son efficacité en pratique. Il conviendra plus tard
+de spécifier ce qu'est un "bon" résultat lors du filtrage sur une variable.
+
+\section{Description du problème}
+À chaque étape (noeud) d'une recherche combinatoire, le solveur utilise
+les heuristiques de recherche demandées pour sélectionner une variable
+et une valeur de son domaine à fixer (partiellement ou entièrement). Puis,
+il applique divers algorithmes d'épuration des domaines pour réduire autant
+que convenable les domaines des variables encore à fixer. \\
+\\
+Nous identifions et considérerons trois principaux facteurs succeptibles
+d'influencer la qualité d'une implémentation de l'heuristique
+\textit{impact}: \\
+\begin{enumerate}
+\item \textbf{La métrique d'évaluation \\}
+Pour comparer les qualités des filtrages effectués sur chaque variable, il
+est essentiel qu'un ordre soit défini sur les valeurs de ces qualités. La
+manière la plus simple d'atteindre ce but est d'associer à chaque filtrage
+une valeur numérique, et il faut alors trouver une manière de faire cette
+association afin d'obtenir un bon filtrage. \\
+\\
+Une bonne approche doit différencier efficacement les qualités, et ce, à 
+tout ordre de grandeur (\textit{mauvaise} vs \textit{moins mauvaise}, 
+\textit{bonne} vs \textit{excellente}). De plus, il serait intéressant que
+les valeurs associées à d'excellentes qualités d'épuration soient comparables
+aux valeurs associées à de mauvaises qualités, car une unique "excellente" 
+qualité pourrait autrement faire passer une variable ne filtrant pratiquement
+jamais les domaines pour une variable sur laquelle il peut en moyenne être
+bon filter. \\
+\\
+Finalement, il faudrait prendre en compte à la fois le nombre de domaines
+épurés et le nombre de valeurs filtrées dans chaque domaine, de manière
+différenciée, et différencier les épurations d'un même nombre de valeurs
+dans des domaines plus ou moins fournis. \\
+\\
+Formellement, nous chercherons une fonction
+\[ Q: \mathbf{N}^{2d} \rightarrow M \subset \mathbf{R} \]
+Où $d$ est le nombre de variables (nombre de domaine à filtrer) et l'image
+est choisie arbitrairement et pourrait aussi être un sous-ensemble des
+entier. \\
+\\
+L'entrée constitue en, pour chaque variable, le nombre de valeurs épurées
+et le nombre de variables présentes dans le domaine. \\
+Une $Q$ idéale projette donc les valeurs dans un $M$ aussi uniformément
+dense que possible dans $\mathbf{R}$. \\
+
+
+\item \textbf{Le pointage associé aux évaluations \\}
+Une fois la métrique déterminée, il faut considérer la manière d'évaluer le
+pointage d'une variable, qui détermine à quel point il est favorable de la
+fixer, en particulier au fil de multiples évaluations. \\
+\\
+En particulier, il est important :
+\begin{enumerate}
+\item Que le pointage soit équitable evers les variables ayant différents
+nombres d'évaluations de métriques associés. En particulier, le calcul doit
+permettre aux variables pour lesquelles il n'y a pas encore eu de filtrage
+d'être sélectionnée.
+\item Que le pointage favorise les variables obtenant de meilleurs résultats
+dans le sous-arbre courrant, ou plutôt qu'il fasse abstraction autant que 
+possible d'éventuelles bonnes épurations dans des recherches lointaines.
+\end{enumerate}
+
+De manière formelle, nous voudrons trouver une fonction
+\[ R: S \times \mathbf{R} \to S \]
+Où $S$ est l'état actuel et compile par exemple des informations comme le
+pointage actuel de la variable, le nombre de filtrages effectués sur cette
+variable et d'autres informations concernant l'état général de la recherche.
+
+\item \textbf{L'efficacité de l'implémentation \\}
+Moins théorique que les deux facteurs précédents, l'efficacité de 
+l'implémentation, tant en mémoire qu'en temps d'exécution, relève néanmoins
+sont importance puisqu'il serait inadéquat qu'une consommation trop élevée
+en mémoire rende l'heuristique inapplicable à certains cas d'utilisation,
+ou que l'efficacité de l'heuristique soit au prorata d'un long délais 
+additionnel à chaque épuration. Aussi préférerons-nous une implémentation
+dotée d'une certaine simplicité algorithique aux alternatives usant de
+structures de données complexes ou nombreuses. \\
+\\
+En particulier, il faudra trouver la juste balance dans l'obtention et 
+l'accumulation d'informations assez nombreuses et précises pour 
+permettre l'utilisation d'une métrique et d'un pointage efficaces, mais
+suffisamment légères et faciles d'accès pour ne pas trop impacter le 
+poids des explorations de chaque noeuds.
+\end{enumerate}
+Quoi qu'il en soit, il conviendra de favoriser une implémentation pouvant
+facilement être ajustée à l'aide de constantes, de manière à permettre une
+optimisation facile, au moins parmis les solutions d'un genre.
+
+\section{Implémentation proposée}
+Il conviendra d'abord de souligner que l'implémentation présentée ici n'est
+probablement pas optimale, les ressources nous manquant pour procéder à de
+plus nombreux tests ou à l'implémentation d'autres alternatives, souvent
+plus complexes. \\
+\subsection{Choix de la métrique}
+En regard des divers éléments susmentionnés, et en considération de la
+possibilité que chuffed ne prévoit présentement aucune méthode de télémétrie,
+on choisit une métrique agissant sur les données déterminées à la section
+précédente, soit le nombre, pour chaque variable, de valeurs dans le domaine
+ainsi que le nombre de valeurs filtrée. \\
+Notant respectivement $t_i$ et $f_i$ ces valeurs pour la $i^\text{ème}$
+variable, la métrique choisie est
+\begin{equation*}
+\begin{split}
+	x =& (f_1, f_2, ..., f_{n-1}, f_n, t_1, t_2, ..., t_{n-1}, t_n) \\
+	local(x) :=& \frac{\sum_{i = 1}^{n}
+	\begin{cases}
+		\frac{f_i}{t_i} \quad &(t_i > 1)\\ C_{local} \quad &(t_i = 1)
+	\end{cases}}{n} \\
+	global(x) :=& \frac{\sum_{i = 1}^{n}\begin{cases}
+		f_i \quad &(t_i > 1) \\ C_{global} \quad &(t_i = 1)
+	\end{cases}}{\sum_{i = 1}^{n}t_i} \\
+	repartition(x) :=& \frac{\sum_{i = 1}^{n}\begin{cases}
+		1 \quad &(f_i > 0) \\
+		C_{repartition} \quad &(f_i = 0, t_i = 1) \\
+		0 \quad &(\text{sinon})
+	\end{cases}}{n} \\
+	Q() :=& \frac{
+	  W_{local} \cdot local(x)
+	+ W_{global} \cdot global(x)
+	+ W_{repartition} \cdot repartition(x)
+	}{W_{local} + W_{global} + W_{repartition}}
+\end{split}
+\end{equation*}
+Une métrique composite où $W_{local}$, $W_{global}$ et $W_{repartition}$
+sont des constantes réelles à définir permettant de balancer l'importance
+donnée à chaque sous-métrique de l'amalgame, et où $C_{local}$,
+$C_{global}$, $C_{repartition}$ sont des constantes à valeur dans $[0, 1]$
+définissant respectivement comment sont considérées les variables fixées
+dans les calcul de moyenne locale, de qualité globale et de répartition. \\
+\\
+La métrique est à valeur dans [0, 1], autrement dit normalisée, ce qui
+la rend plus facile à manipuler, à la fois à des fins d'ajustement et
+par la fonction de pointage qui la reçoit.
+
+\subsection{Choix du pointage}
+Le choix d'un pointage idéal est plus complexe que celui de la métrique,
+car il est plus difficile de trouver un algorithme générique facilement
+ajustable recouvrant diverses possibilités - et la plupart des idées 
+relèverait finalement d'implémentations complètement différenciées, que
+ce soit au niveau des structures de données utilisées ou de la logique 
+appliquée. Le troisième point de la section précédente revet alors une
+importance accrue. \\
+\\
+Finalement, la méthode de pointage choisie est
+\[ S(p_n, q) := \frac{(1 - D)np_n + q}{(1 - D)n + 1} \quad D \in (-\infty, 1) \]
+Où $p_n$ est le score de la variable après n épurations, $q$ est la 
+qualité obtenue pour la présente épuration et D est une constante à définir
+déterminant l'importance accordée aux qualités plus récentes par rapport aux
+valeurs plus anciennes. \\
+\\
+On remarque en particulier qu'il s'agit d'un pointage global à la recherche.
+Il aurait pu être intéressant de se pencher sur des pointages locaux à un
+sous-arbre de la fouille, mais nous aurons choisi de se passer de cette
+complexité additionnelle, et de ne gérer la localité qu'à l'aide de la
+constante de dépérissement des vieux pointages.
+
+\section{Méthodologie}
+
+\section{Résultats}
+{
+\centering
+\rowcolors{4}{}
+{gray!90!gray!50}
+\begin{tabular}{|c||r|r||r|r|  }
+	\hline
+	\multicolumn{5}{|c|}{\bf{Résultats expérimentaux}} \\
+	\hline
+	Méthode $\rightarrow$
+	& \multicolumn{2}{c||}{\bf{Cohérence de bornes}} 
+	& \multicolumn{2}{c|}{\bf{Cohérence de domaine}} \\
+	\hline
+	\bf{n} & Temps (secondes) & Nombre de noeuds & Temps (secondes) & Nombre de noeuds \\
+	\hline
+	3	& 0.000		& 7			& 0.004		& 7 \\
+	12	& 	& 					& 144.398	& 13704 \\
+	13	& 	& 					& 	&  \\
+	\hline
+\end{tabular} \\
+}
+
+\section{Discussion}
+
+La métrique Impact n'est d'aucune utilité pour les fouilles sans retour arrière.
+On s'attend à ce qu'elle soit plus utile pour les problèmes de
+maximisation / minimisation.
+
+\section{Conclusion}
+
+
+
+\end{document}
